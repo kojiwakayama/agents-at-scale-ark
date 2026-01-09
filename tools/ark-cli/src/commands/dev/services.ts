@@ -2,16 +2,15 @@ import path from 'path';
 import type {DevService} from './types.js';
 
 export function getDevServices(arkRoot: string, kubeconfigPath: string): DevService[] {
+  const dataDir = path.join(arkRoot, 'services/ark-apiserver/data');
   return [
     {
       name: 'ark-apiserver',
-      command: 'go',
+      command: path.join(arkRoot, 'services/ark-apiserver/bin/ark-apiserver'),
       args: [
-        'run',
-        './cmd/apiserver',
         '--secure-port=8443',
         '--storage-driver=sqlite',
-        '--sqlite-path=./data/ark-dev.db',
+        `--sqlite-path=${dataDir}/ark-dev.db`,
       ],
       cwd: path.join(arkRoot, 'services/ark-apiserver'),
       port: 8443,
@@ -21,7 +20,7 @@ export function getDevServices(arkRoot: string, kubeconfigPath: string): DevServ
     {
       name: 'ark-api',
       command: 'uv',
-      args: ['run', 'python', '-m', 'ark_api'],
+      args: ['run', 'uvicorn', '--host', '0.0.0.0', '--port', '8000', 'src.ark_api.main:app'],
       cwd: path.join(arkRoot, 'services/ark-api/ark-api'),
       port: 8000,
       healthCheck: 'http://localhost:8000/health',

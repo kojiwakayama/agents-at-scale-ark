@@ -27,9 +27,33 @@ async function findArkRoot(): Promise<string> {
   );
 }
 
+const COMMON_PATHS = [
+  '/opt/homebrew/bin',
+  '/usr/local/go/bin',
+  '/usr/local/bin',
+  '/usr/bin',
+  process.env.GOROOT ? `${process.env.GOROOT}/bin` : '',
+  process.env.GOPATH ? `${process.env.GOPATH}/bin` : '',
+].filter(Boolean);
+
+function getEnhancedPath(): string {
+  const currentPath = process.env.PATH || '';
+  const pathParts = currentPath.split(':');
+  for (const p of COMMON_PATHS) {
+    if (!pathParts.includes(p)) {
+      pathParts.unshift(p);
+    }
+  }
+  return pathParts.join(':');
+}
+
 async function checkCommand(cmd: string, name: string): Promise<{version: string; ok: boolean}> {
+  const enhancedPath = getEnhancedPath();
+  const versionArg = cmd === 'go' ? 'version' : '--version';
   try {
-    const {stdout} = await execa(cmd, ['--version']);
+    const {stdout} = await execa(cmd, [versionArg], {
+      env: {...process.env, PATH: enhancedPath},
+    });
     const version = stdout.split('\n')[0].trim();
     return {version, ok: true};
   } catch {
@@ -46,7 +70,7 @@ async function checkPort(port: number): Promise<boolean> {
   }
 }
 
-async function checkPrerequisites(): Promise<void> {
+async function checkPrerequisites(options: {dashboard: boolean}): Promise<void> {
   const spinner = ora('Checking prerequisites...').start();
 
   const checks = [
@@ -83,7 +107,44 @@ async function checkPrerequisites(): Promise<void> {
     process.exit(1);
   }
 
-  const ports = [8443, 8000, 8080, 3000];
+  const arkRoot = await findArkRoot();
+
+  console.log(chalk.bold('\nBuild artifacts:'));
+  const versionTxt = path.join(arkRoot, 'version.txt');
+  let version = '0.1.49';
+  if (fs.existsSync(versionTxt)) {
+    version = fs.readFileSync(versionTxt, 'utf-8').trim();
+  }
+
+  const apiserverBin = path.join(arkRoot, 'services/ark-apiserver/bin/ark-apiserver');
+  const sdkWheel = path.join(arkRoot, `out/ark-sdk/py-sdk/dist/ark_sdk-${version}-py3-none-any.whl`);
+
+  const buildArtifacts = [
+    {name: 'ark-apiserver binary', path: apiserverBin, buildCmd: 'make -C ark build'},
+    {name: 'ark-sdk wheel', path: sdkWheel, buildCmd: 'make ark-sdk-build'},
+  ];
+
+  let hasAllArtifacts = true;
+  for (const artifact of buildArtifacts) {
+    if (fs.existsSync(artifact.path)) {
+      console.log(`  ${chalk.green('✓')} ${artifact.name}`);
+    } else {
+      console.log(`  ${chalk.red('✗')} ${artifact.name}: ${chalk.red('not found')}`);
+      hasAllArtifacts = false;
+    }
+  }
+
+  if (!hasAllArtifacts) {
+    console.log(chalk.red('\nMissing build artifacts. Please run:'));
+    for (const artifact of buildArtifacts) {
+      if (!fs.existsSync(artifact.path)) {
+        console.log(chalk.gray(`  ${artifact.buildCmd}`));
+      }
+    }
+    process.exit(1);
+  }
+
+  const ports = options.dashboard ? [8443, 8000, 8080, 3000] : [8443, 8000, 8080];
   const portResults: {port: number; available: boolean}[] = [];
 
   for (const port of ports) {
@@ -112,20 +173,24 @@ async function checkPrerequisites(): Promise<void> {
   console.log('');
 }
 
-async function startDevMode(options: {dashboard: boolean}): Promise<void> {
+async function startDevMode(options: {dashboard: boolean; executor: boolean}): Promise<void> {
   try {
     const arkRoot = await findArkRoot();
     console.log(chalk.gray(`Ark root: ${arkRoot}\n`));
 
-    await checkPrerequisites();
+    await checkPrerequisites(options);
 
     const kubeconfigPath = await writeDevKubeconfig('https://localhost:8443');
     console.log(chalk.gray(`Kubeconfig: ${kubeconfigPath}\n`));
 
     const services = getDevServices(arkRoot, kubeconfigPath);
-    const filteredServices = options.dashboard
-      ? services
-      : services.filter((s) => s.name !== 'dashboard');
+    let filteredServices = services;
+    if (!options.dashboard) {
+      filteredServices = filteredServices.filter((s) => s.name !== 'dashboard');
+    }
+    if (!options.executor) {
+      filteredServices = filteredServices.filter((s) => s.name !== 'executor-langchain');
+    }
 
     const manager = new DevProcessManager();
 
@@ -272,8 +337,9 @@ export function createDevCommand(config: ArkConfig): Command {
     .command('start')
     .description('Start all Ark services locally')
     .option('--no-dashboard', 'Skip starting the dashboard')
+    .option('--no-executor', 'Skip starting the executor service')
     .action(async (options) => {
-      await startDevMode({dashboard: options.dashboard});
+      await startDevMode({dashboard: options.dashboard, executor: options.executor});
     });
 
   dev

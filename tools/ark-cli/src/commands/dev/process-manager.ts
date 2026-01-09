@@ -6,6 +6,26 @@ import type {DevService, ServiceStatus} from './types.js';
 
 const STATE_FILE = path.join(os.homedir(), '.ark', 'dev-state.json');
 
+const COMMON_PATHS = [
+  '/opt/homebrew/bin',
+  '/usr/local/go/bin',
+  '/usr/local/bin',
+  '/usr/bin',
+  process.env.GOROOT ? `${process.env.GOROOT}/bin` : '',
+  process.env.GOPATH ? `${process.env.GOPATH}/bin` : '',
+].filter(Boolean);
+
+function getEnhancedPath(): string {
+  const currentPath = process.env.PATH || '';
+  const pathParts = currentPath.split(':');
+  for (const p of COMMON_PATHS) {
+    if (!pathParts.includes(p)) {
+      pathParts.unshift(p);
+    }
+  }
+  return pathParts.join(':');
+}
+
 interface ProcessState {
   pid: number;
   name: string;
@@ -29,7 +49,7 @@ export class DevProcessManager {
 
     const proc = execa(service.command, service.args, {
       cwd: service.cwd,
-      env: {...process.env, ...service.env},
+      env: {...process.env, PATH: getEnhancedPath(), ...service.env},
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
     });
@@ -67,16 +87,37 @@ export class DevProcessManager {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2000);
 
-        const fetchOptions: RequestInit = {
-          signal: controller.signal,
-        };
+        if (isHttps) {
+          const https = await import('https');
+          const url = new URL(service.healthCheck);
+          const result = await new Promise<{ok: boolean; status: number}>((resolve, reject) => {
+            const req = https.request({
+              hostname: url.hostname,
+              port: url.port || 443,
+              path: url.pathname,
+              method: 'GET',
+              rejectUnauthorized: false,
+              timeout: 2000,
+            }, (res) => {
+              resolve({ok: res.statusCode !== undefined && res.statusCode < 400, status: res.statusCode || 0});
+            });
+            req.on('error', reject);
+            req.on('timeout', () => reject(new Error('timeout')));
+            req.end();
+          });
 
-        const response = await fetch(service.healthCheck, fetchOptions);
+          clearTimeout(timeoutId);
 
-        clearTimeout(timeoutId);
+          if (result.ok || result.status < 500) {
+            return;
+          }
+        } else {
+          const response = await fetch(service.healthCheck, {signal: controller.signal});
+          clearTimeout(timeoutId);
 
-        if (response.ok || response.status < 500) {
-          return;
+          if (response.ok || response.status < 500) {
+            return;
+          }
         }
       } catch {
         // Service not ready yet, wait and retry

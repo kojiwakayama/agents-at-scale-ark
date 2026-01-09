@@ -17,8 +17,8 @@ dependencies = [
     "langchain-community>=0.0.20", # community integrations (FAISS)
     "faiss-cpu>=1.7.4", # vector search
     "tiktoken>=0.5.0",
-    "ark-sdk",
     "urllib3>=2.6.0",
+    "ark-sdk",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -86,4 +86,4 @@ testpaths = [
 ]
 
 [tool.uv.sources]
-ark-sdk = { path = "../../out/ark-sdk/py-sdk/dist/ark_sdk-0.1.47-py3-none-any.whl" }
+ark-sdk = { path = "../../out/ark-sdk/py-sdk/dist/ark_sdk-0.1.49-py3-none-any.whl" }
