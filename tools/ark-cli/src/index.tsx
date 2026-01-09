@@ -33,6 +33,7 @@ import {createTargetsCommand} from './commands/targets/index.js';
 import {createTeamsCommand} from './commands/teams/index.js';
 import {createToolsCommand} from './commands/tools/index.js';
 import {createRoutesCommand} from './commands/routes/index.js';
+import {createDevCommand} from './commands/dev/index.js';
 import MainMenu from './ui/MainMenu.js';
 
 function showMainMenu(config: ArkConfig) {
@@ -77,6 +78,7 @@ async function main() {
   program.addCommand(createTeamsCommand(config));
   program.addCommand(createToolsCommand(config));
   program.addCommand(createRoutesCommand(config));
+  program.addCommand(createDevCommand(config));
 
   // If no args provided, show interactive menu
   if (process.argv.length === 2) {
